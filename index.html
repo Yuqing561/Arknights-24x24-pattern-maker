@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>24 × 24 像素图生成器</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <img class="character-decoration" src="image/Character.webp" alt="" aria-hidden="true" />
+    <main class="app-shell">
+      <header class="app-header">
+        <div class="header-copy">
+          <h1 class="site-title">
+            <img src="image/Title.png" alt="Fuse Bead Converter" />
+          </h1>
+          <div class="header-text">
+            <p class="eyebrow" data-i18n="tagline">24 × 24 像素图生成器</p>
+            <p class="intro" data-i18n="intro">导入图片，并使用现有颜色生成 24 × 24 像素图。</p>
+          </div>
+        </div>
+      </header>
+
+      <div class="language-switcher" role="group" aria-label="语言 / Language">
+        <button class="language-option is-active" type="button" data-language="zh" aria-pressed="true">🇨🇳 中文</button>
+        <button class="language-option" type="button" data-language="en" aria-pressed="false">🇺🇸 English</button>
+      </div>
+
+      <section class="workspace" aria-label="Image conversion workspace">
+        <div class="source-column">
+          <article class="panel preview-panel">
+          <div class="panel-heading">
+            <h2 data-i18n="original">原图</h2>
+            <span id="fileName" class="muted" data-i18n="noImage">未选择图片</span>
+          </div>
+          <div id="previewFrame" class="preview-frame" role="button" tabindex="0" aria-label="Import image drop zone">
+            <img id="imagePreview" alt="Imported image preview" hidden />
+            <canvas id="previewCanvas" class="preview-canvas" width="1200" height="1200" hidden></canvas>
+            <p id="previewPrompt" class="drop-prompt"><strong data-i18n="dragHere">将图片拖到这里</strong><span data-i18n="orImport">或点击“导入图片”</span><small>JPG, JPEG, PNG, or WebP</small></p>
+            <div id="cropSelection" class="crop-selection" hidden>
+              <span class="crop-handle crop-handle-nw" data-corner="nw"></span>
+              <span class="crop-handle crop-handle-ne" data-corner="ne"></span>
+              <span class="crop-handle crop-handle-sw" data-corner="sw"></span>
+              <span class="crop-handle crop-handle-se" data-corner="se"></span>
+            </div>
+          </div>
+          <div class="actions preview-actions">
+            <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp" hidden />
+            <button id="importButton" class="button button-secondary" type="button" data-i18n="importImage">导入图片</button>
+            <button id="generateButton" class="button button-primary" type="button" disabled data-i18n="generate">生成</button>
+          </div>
+          </article>
+
+          <article class="panel stage-one-panel">
+          <div class="panel-heading">
+            <div>
+              <h2 data-i18n="original24">原始 24 × 24</h2>
+              <span class="muted" data-i18n="beforePalette">调色前预览</span>
+            </div>
+          </div>
+          <div class="stage-one-frame">
+            <canvas id="sourceDebugCanvas" width="24" height="24" aria-label="Original image downsampled to 24 by 24 pixels"></canvas>
+          </div>
+          </article>
+        </div>
+
+        <article class="panel result-panel">
+          <div class="panel-heading">
+            <h2 data-i18n="pattern24">24 × 24 成品</h2>
+            <span id="patternStatus" class="muted">等待导入图片</span>
+          </div>
+          <div class="grid-stage">
+            <img id="patternImage" class="pattern-image" alt="Generated 24 by 24 fuse bead pattern" hidden />
+            <div id="beadGrid" class="bead-grid debug-pattern-grid" role="img" aria-label="Empty 24 by 24 fuse bead pattern"></div>
+          </div>
+          <div class="result-actions">
+            <button id="saveImageButton" class="button button-secondary" type="button" disabled data-i18n="saveImage">保存图片</button>
+            <label class="grid-toggle"><input id="showGridRuler" type="checkbox" checked /> <span data-i18n="showGrid">显示网格和标尺</span></label>
+          </div>
+        </article>
+        <canvas id="cropMagnifier" class="crop-magnifier" width="320" height="320" hidden aria-hidden="true"></canvas>
+      </section>
+
+      <section class="panel colors-panel" aria-labelledby="colorsHeading">
+        <div class="panel-heading colors-heading">
+          <div>
+            <h2 id="colorsHeading" data-i18n="colorsUsed">使用颜色</h2>
+            <p id="colorSummary" class="muted" hidden data-i18n="emptyColors">生成图案后可查看颜色数量。</p>
+          </div>
+          <strong id="totalCount" class="total-count" hidden>0 / 576 beads</strong>
+        </div>
+        <div id="colorsUsed" class="colors-used"></div>
+        <p id="reconstructionError" class="diagnostic-line" hidden></p>
+      </section>
+
+      <section id="redTraceReport" class="panel trace-panel" aria-labelledby="redTraceHeading" hidden>
+        <div class="panel-heading">
+          <div>
+            <h2 id="redTraceHeading">Color 7 Assignment Trace</h2>
+            <p class="muted">Temporary diagnostic for #D60C4A final assignments.</p>
+          </div>
+        </div>
+        <div id="redTraceContent" class="trace-content"></div>
+      </section>
+
+      <section id="speckleReport" class="panel trace-panel" aria-labelledby="speckleHeading" hidden>
+        <div class="panel-heading">
+          <div>
+            <h2 id="speckleHeading">Isolated Chromatic Speckle Cleanup</h2>
+            <p class="muted">Final conservative cleanup diagnostics.</p>
+          </div>
+        </div>
+        <div id="speckleContent" class="trace-content"></div>
+      </section>
+
+      <section id="cellDebugPanel" class="panel cell-debug-panel" aria-labelledby="cellDebugHeading" hidden>
+        <div class="panel-heading">
+          <div>
+            <h2 id="cellDebugHeading">Cell Matching Debug</h2>
+            <p id="cellDebugPosition" class="muted"></p>
+          </div>
+        </div>
+        <div id="cellDebugSummary" class="cell-debug-summary"></div>
+        <div class="candidate-table-wrap">
+          <h3 class="debug-subheading">Top 5 within lightness window</h3>
+          <table class="candidate-table">
+            <thead>
+              <tr>
+                <th>Rank</th><th>Bead</th><th>HEX</th><th>L</th><th>C</th><th>H</th><th>ΔL</th><th>ΔC</th><th>ΔH</th><th>Identity</th><th>Neutral takeover</th><th>Final score</th>
+              </tr>
+            </thead>
+            <tbody id="candidateTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <canvas id="processingCanvas" width="24" height="24" hidden></canvas>
+    </main>
+    <footer class="creator-footer">
+      <span data-i18n="creator">创作者 561</span>
+      <span><span data-i18n="contact">联系方式：</span><a href="mailto:yw561art@gmail.com">yw561art@gmail.com</a></span>
+      <span><span data-i18n="uid">UID：</span>6396786</span>
+      <span data-i18n="thanks">感谢使用</span>
+    </footer>
+    <script src="script.js"></script>
+  </body>
+</html>
