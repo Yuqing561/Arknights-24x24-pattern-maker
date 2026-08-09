@@ -322,8 +322,15 @@ h2 { margin-bottom: 0; font-size: 1rem; }
   .result-panel > .panel-heading { align-items: flex-start; }
   .language-option { padding-inline: 6px; }
   .preview-panel, .stage-one-panel, .result-panel, .colors-panel { padding: 14px; }
-  .result-actions { align-items: stretch; flex-direction: column; gap: 4px; }
-  .result-actions .button { width: 100%; }
+  .result-actions {
+    position: static;
+    flex: 0 0 auto;
+    align-items: center;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .result-actions .button { width: auto; }
   .grid-toggle { justify-content: center; }
   .cell-debug-summary { grid-template-columns: 1fr; }
 }
