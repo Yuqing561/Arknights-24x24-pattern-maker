@@ -322,11 +322,28 @@ h2 { margin-bottom: 0; font-size: 1rem; }
   .result-panel > .panel-heading { align-items: flex-start; }
   .language-option { padding-inline: 6px; }
   .preview-panel, .stage-one-panel, .result-panel, .colors-panel { padding: 14px; }
+  .workspace .result-panel {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+  .result-panel .grid-stage {
+    position: relative;
+    display: block;
+    flex: none;
+    width: 100%;
+    height: auto;
+    min-height: auto;
+    overflow: visible;
+  }
   .result-actions {
-    position: static;
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
     flex: 0 0 auto;
     align-items: center;
     flex-direction: column;
+    width: 100%;
     gap: 10px;
     margin-top: 12px;
   }
