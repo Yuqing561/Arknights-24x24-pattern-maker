@@ -69,29 +69,23 @@
             <h2 data-i18n="pattern24">24 × 24 成品</h2>
             <span id="patternStatus" class="muted">等待导入图片</span>
           </div>
-          <div class="grid-stage">
-            <img id="patternImage" class="pattern-image" alt="Generated 24 by 24 fuse bead pattern" hidden />
-            <div id="beadGrid" class="bead-grid debug-pattern-grid" role="img" aria-label="Empty 24 by 24 fuse bead pattern"></div>
+          <div class="result-visuals">
+            <div class="grid-stage">
+              <img id="patternImage" class="pattern-image" alt="Generated 24 by 24 fuse bead pattern" hidden />
+              <div id="beadGrid" class="bead-grid debug-pattern-grid" role="img" aria-label="Empty 24 by 24 fuse bead pattern"></div>
+            </div>
+            <div id="paletteReference" class="palette-reference" aria-label="40-color bead palette"></div>
           </div>
           <div class="result-actions">
             <button id="saveImageButton" class="button button-secondary" type="button" disabled data-i18n="saveImage">保存图片</button>
             <label class="grid-toggle"><input id="showGridRuler" type="checkbox" checked /> <span data-i18n="showGrid">显示网格和标尺</span></label>
+            <label class="grid-toggle"><input id="includePalette" type="checkbox" /> <span data-i18n="includePalette">同时保存色卡</span></label>
           </div>
         </article>
         <canvas id="cropMagnifier" class="crop-magnifier" width="320" height="320" hidden aria-hidden="true"></canvas>
       </section>
 
-      <section class="panel colors-panel" aria-labelledby="colorsHeading">
-        <div class="panel-heading colors-heading">
-          <div>
-            <h2 id="colorsHeading" data-i18n="colorsUsed">使用颜色</h2>
-            <p id="colorSummary" class="muted" hidden data-i18n="emptyColors">生成图案后可查看颜色数量。</p>
-          </div>
-          <strong id="totalCount" class="total-count" hidden>0 / 576 beads</strong>
-        </div>
-        <div id="colorsUsed" class="colors-used"></div>
-        <p id="reconstructionError" class="diagnostic-line" hidden></p>
-      </section>
+      <p id="reconstructionError" class="diagnostic-line" hidden></p>
 
       <section id="redTraceReport" class="panel trace-panel" aria-labelledby="redTraceHeading" hidden>
         <div class="panel-heading">

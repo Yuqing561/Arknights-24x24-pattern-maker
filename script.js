@@ -27,6 +27,7 @@ const translations = {
     generationFailed: "生成失败",
     saveImage: "保存图片",
     showGrid: "显示网格和标尺",
+    includePalette: "同时保存色卡",
     colorsUsed: "使用颜色",
     emptyColors: "生成图案后可查看颜色数量。",
     colorsSummary: ({ count }) => `已使用 ${count} 种颜色`,
@@ -62,6 +63,7 @@ const translations = {
     generationFailed: "Generation failed",
     saveImage: "Save Image",
     showGrid: "Show grid & ruler",
+    includePalette: "Include color palette",
     colorsUsed: "Colors Used",
     emptyColors: "Generate a pattern to see its bead counts.",
     colorsSummary: ({ count }) => `${count} palette ${count === 1 ? "color" : "colors"} used`,
@@ -148,10 +150,9 @@ const elements = {
   patternImage: document.querySelector("#patternImage"),
   saveImageButton: document.querySelector("#saveImageButton"),
   showGridRuler: document.querySelector("#showGridRuler"),
+  includePalette: document.querySelector("#includePalette"),
+  paletteReference: document.querySelector("#paletteReference"),
   status: document.querySelector("#patternStatus"),
-  colorsUsed: document.querySelector("#colorsUsed"),
-  colorSummary: document.querySelector("#colorSummary"),
-  totalCount: document.querySelector("#totalCount"),
   reconstructionError: document.querySelector("#reconstructionError"),
   redTraceReport: document.querySelector("#redTraceReport"),
   redTraceContent: document.querySelector("#redTraceContent"),
@@ -173,10 +174,13 @@ const elements = {
 let importedImage = null;
 let currentObjectUrl = null;
 let latestQuantization = null;
+let isolatedPaletteIndex = null;
 let cropSelection = { x: 0, y: 0, size: 1 };
 let containedImageBounds = { x: 0, y: 0, width: 1, height: 1 };
 let cropInteraction = null;
 const gridCells = [];
+const paletteCells = [];
+let latestUsageCounts = new Map();
 const palette = BEAD_COLORS.map(({ id, hex }, index) => ({
   id,
   index,
@@ -185,6 +189,63 @@ const palette = BEAD_COLORS.map(({ id, hex }, index) => ({
   oklch: hexToOklch(hex),
   family: classifyHueFamily(hexToOklch(hex))
 }));
+
+function initializePaletteReference() {
+  const fragment = document.createDocumentFragment();
+  palette.forEach((color, index) => {
+    const cell = document.createElement("div");
+    cell.className = "palette-reference-cell";
+    cell.style.backgroundColor = color.hex;
+    cell.dataset.paletteIndex = String(index);
+    cell.title = `${color.id} · ${color.hex}`;
+    cell.setAttribute("aria-label", `${color.id}, ${color.hex}`);
+    cell.addEventListener("click", () => toggleColorIsolate(index));
+    cell.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggleColorIsolate(index);
+      }
+    });
+    fragment.appendChild(cell);
+    paletteCells.push(cell);
+  });
+  elements.paletteReference.appendChild(fragment);
+}
+
+function updatePaletteUsage(counts = null) {
+  paletteCells.forEach((cell, index) => {
+    const hasGeneratedPattern = counts !== null;
+    const isAvailable = hasGeneratedPattern && counts.has(index);
+    const isIsolatedSelection = isAvailable && isolatedPaletteIndex === index;
+    cell.classList.toggle("is-available", isAvailable);
+    cell.classList.toggle("is-used", isAvailable);
+    cell.classList.toggle("is-unused", hasGeneratedPattern && !isAvailable);
+    cell.classList.toggle("is-isolated", isIsolatedSelection);
+    if (isAvailable) {
+      cell.setAttribute("role", "button");
+      cell.setAttribute("tabindex", "0");
+      cell.setAttribute("aria-pressed", String(isIsolatedSelection));
+    } else {
+      cell.removeAttribute("role");
+      cell.removeAttribute("tabindex");
+      cell.removeAttribute("aria-pressed");
+    }
+  });
+}
+
+function toggleColorIsolate(index) {
+  if (!latestQuantization || !latestUsageCounts.has(index)) return;
+  isolatedPaletteIndex = isolatedPaletteIndex === index ? null : index;
+  updatePaletteUsage(latestUsageCounts);
+  renderPatternImage(latestQuantization.indexes);
+}
+
+function clearColorIsolate({ render = true } = {}) {
+  if (isolatedPaletteIndex === null) return;
+  isolatedPaletteIndex = null;
+  updatePaletteUsage(latestQuantization ? latestUsageCounts : null);
+  if (render && latestQuantization) renderPatternImage(latestQuantization.indexes);
+}
 
 function setStatus(key, params = {}) {
   currentStatus = { key, params };
@@ -242,16 +303,18 @@ function initializeGrid() {
   for (let i = 0; i < TOTAL_BEADS; i += 1) {
     const cell = document.createElement("div");
     cell.className = "bead-cell";
-    cell.setAttribute("role", "button");
-    cell.setAttribute("tabindex", "0");
     cell.setAttribute("aria-label", translate("patternCell", { cell: i + 1 }));
-    cell.addEventListener("click", () => showCellDebug(i));
-    cell.addEventListener("keydown", event => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        showCellDebug(i);
-      }
-    });
+    if (DEBUG_MODE) {
+      cell.setAttribute("role", "button");
+      cell.setAttribute("tabindex", "0");
+      cell.addEventListener("click", () => showCellDebug(i));
+      cell.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          showCellDebug(i);
+        }
+      });
+    }
     fragment.appendChild(cell);
     gridCells.push(cell);
   }
@@ -288,6 +351,8 @@ function loadImageFile(file) {
     elements.input.value = "";
     return;
   }
+
+  clearColorIsolate();
 
   const nextUrl = URL.createObjectURL(file);
   const image = new Image();
@@ -334,6 +399,7 @@ elements.previewFrame.addEventListener("drop", event => {
 
 elements.generateButton.addEventListener("click", () => {
   if (!importedImage) return;
+  clearColorIsolate({ render: false });
   elements.generateButton.disabled = true;
   setStatus("generating");
   elements.cellDebugPanel.hidden = true;
@@ -1837,7 +1903,7 @@ function renderPattern(indexes) {
   });
 }
 
-function createPatternExportCanvas(indexes, includeGridAndRuler) {
+function createPatternExportCanvas(indexes, includeGridAndRuler, previewIsolateIndex = null) {
   const cellSize = 32;
   const rulerSize = includeGridAndRuler ? 32 : 0;
   const artworkSize = GRID_SIZE * cellSize;
@@ -1852,8 +1918,17 @@ function createPatternExportCanvas(indexes, includeGridAndRuler) {
   indexes.forEach((paletteIndex, position) => {
     const column = position % GRID_SIZE;
     const row = Math.floor(position / GRID_SIZE);
+    const x = rulerSize + column * cellSize;
+    const y = rulerSize + row * cellSize;
     context.fillStyle = palette[paletteIndex].hex;
-    context.fillRect(rulerSize + column * cellSize, rulerSize + row * cellSize, cellSize, cellSize);
+    context.fillRect(x, y, cellSize, cellSize);
+    if (previewIsolateIndex !== null && paletteIndex !== previewIsolateIndex) {
+      context.save();
+      context.globalCompositeOperation = "multiply";
+      context.fillStyle = "rgba(8, 18, 42, 0.62)";
+      context.fillRect(x, y, cellSize, cellSize);
+      context.restore();
+    }
   });
 
   if (includeGridAndRuler) {
@@ -1879,11 +1954,67 @@ function createPatternExportCanvas(indexes, includeGridAndRuler) {
       context.fillText(String(coordinate + 1), rulerSize / 2, center);
     }
   }
+
+  if (previewIsolateIndex !== null) {
+    context.strokeStyle = "rgba(235, 235, 230, 0.84)";
+    context.lineWidth = 1.5;
+    indexes.forEach((paletteIndex, position) => {
+      if (paletteIndex !== previewIsolateIndex) return;
+      const column = position % GRID_SIZE;
+      const row = Math.floor(position / GRID_SIZE);
+      const x = rulerSize + column * cellSize + 1;
+      const y = rulerSize + row * cellSize + 1;
+      context.strokeRect(x, y, cellSize - 2, cellSize - 2);
+    });
+  }
+  return canvas;
+}
+
+function createCombinedExportCanvas(indexes, includeGridAndRuler, includeColorPalette) {
+  const patternCanvas = createPatternExportCanvas(indexes, includeGridAndRuler);
+  if (!includeColorPalette) return patternCanvas;
+
+  const gap = 24;
+  const paletteHeight = patternCanvas.height * 0.88;
+  const paletteTop = (patternCanvas.height - paletteHeight) / 2;
+  const paletteSlotSize = paletteHeight / 10;
+  const tileGap = Math.max(2, Math.round(paletteSlotSize * 0.08));
+  const tileSize = paletteSlotSize - tileGap;
+  const paletteWidth = paletteSlotSize * 4;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(patternCanvas.width + gap + paletteWidth);
+  canvas.height = patternCanvas.height;
+  const context = canvas.getContext("2d");
+  const usedIndexes = new Set(indexes);
+
+  context.fillStyle = "#FFFFFF";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(patternCanvas, 0, 0);
+
+  palette.forEach((color, index) => {
+    if (!usedIndexes.has(index)) return;
+    const column = index % 4;
+    const row = Math.floor(index / 4);
+    const x = patternCanvas.width + gap + column * paletteSlotSize + tileGap / 2;
+    const y = paletteTop + row * paletteSlotSize + tileGap / 2;
+    const radius = Math.max(2, tileSize * 0.045);
+
+    context.save();
+    context.beginPath();
+    context.roundRect(x, y, tileSize, tileSize, radius);
+    context.fillStyle = color.hex;
+    context.fill();
+    context.strokeStyle = "#5A5A5A";
+    context.lineWidth = 2;
+    context.stroke();
+    context.restore();
+  });
+
   return canvas;
 }
 
 function renderPatternImage(indexes) {
-  const canvas = createPatternExportCanvas(indexes, elements.showGridRuler.checked);
+  const canvas = createPatternExportCanvas(indexes, elements.showGridRuler.checked, isolatedPaletteIndex);
   elements.patternImage.src = canvas.toDataURL("image/png");
   elements.patternImage.hidden = DEBUG_MODE;
   elements.grid.style.display = DEBUG_MODE ? "grid" : "none";
@@ -1895,9 +2026,13 @@ elements.showGridRuler.addEventListener("change", () => {
 
 elements.saveImageButton.addEventListener("click", () => {
   if (!latestQuantization) return;
-  const canvas = createPatternExportCanvas(latestQuantization.indexes, elements.showGridRuler.checked);
+  const canvas = createCombinedExportCanvas(
+    latestQuantization.indexes,
+    elements.showGridRuler.checked,
+    elements.includePalette.checked
+  );
   const link = document.createElement("a");
-  link.download = `fuse-bead-pattern-${elements.showGridRuler.checked ? "with-grid" : "clean"}.png`;
+  link.download = `fuse-bead-pattern-${elements.showGridRuler.checked ? "with-grid" : "clean"}${elements.includePalette.checked ? "-with-palette" : ""}.png`;
   link.href = canvas.toDataURL("image/png");
   link.click();
 });
@@ -1907,22 +2042,9 @@ function renderColorUsage(result) {
   const counts = new Map();
   indexes.forEach(index => counts.set(index, (counts.get(index) || 0) + 1));
   const used = [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  elements.colorsUsed.replaceChildren();
-
-  const fragment = document.createDocumentFragment();
-  for (const [index, count] of used) {
-    const percentage = count / TOTAL_BEADS * 100;
-    const tone = tonalStats[index];
-    const item = document.createElement("div");
-    item.className = "color-item";
-    item.innerHTML = DEBUG_MODE
-      ? `<span class="swatch" style="background:${palette[index].hex}"></span><span class="color-details"><span class="color-id">Color ${palette[index].id}</span><span class="hex">${palette[index].hex}</span></span><span class="bead-count">${count} ${count === 1 ? "bead" : "beads"}<br>${percentage.toFixed(1)}%</span><span class="tone-stats">Source L: ${tone.minSourceL.toFixed(3)}–${tone.maxSourceL.toFixed(3)} · avg ${tone.averageSourceL.toFixed(3)}</span>`
-      : `<span class="swatch" style="background:${palette[index].hex}" aria-hidden="true"></span><strong class="usage-percentage">${percentage.toFixed(1)}%</strong>`;
-    fragment.appendChild(item);
-  }
-  elements.colorsUsed.appendChild(fragment);
-  elements.colorSummary.textContent = translate("colorsSummary", { count: used.length });
-  elements.totalCount.textContent = translate("totalBeads", { count: indexes.length });
+  latestUsageCounts = counts;
+  updatePaletteUsage(counts);
+  result.colorUsage = { counts, used, tonalStats };
   elements.reconstructionError.textContent = DEBUG_MODE && detailRecoveryStats
     ? `Detail Recovery: ${detailRecoveryStats.colorsBefore} → ${detailRecoveryStats.colorsAfter} colors · ${detailRecoveryStats.pixelsChanged} pixels changed · average CIEDE2000 ${detailRecoveryStats.averageErrorBefore.toFixed(2)} → ${detailRecoveryStats.averageErrorAfter.toFixed(2)} · final ${averageDeltaE.toFixed(2)}`
     : `Average perceptual reconstruction error (CIEDE2000): ${averageDeltaE.toFixed(2)}`;
@@ -2253,5 +2375,6 @@ function initializeDisplayMode() {
 }
 
 initializeGrid();
+initializePaletteReference();
 initializeDisplayMode();
 applyLanguage("zh");
