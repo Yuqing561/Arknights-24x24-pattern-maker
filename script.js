@@ -2095,8 +2095,16 @@ async function shareCurrentPatternOnMobile() {
 
   const { canvas, filename } = exportResult;
   if (typeof File === "function" && typeof navigator.share === "function" && typeof navigator.canShare === "function") {
-    const file = createPngFileFromCanvas(canvas, filename);
-    if (navigator.canShare({ files: [file] })) {
+    let file = null;
+    let canSharePngFile = false;
+    try {
+      file = createPngFileFromCanvas(canvas, filename);
+      canSharePngFile = file.type === "image/png" && navigator.canShare({ files: [file] });
+    } catch (capabilityError) {
+      console.warn("Native PNG file sharing is unavailable; using file download fallback.", capabilityError);
+    }
+
+    if (canSharePngFile) {
       try {
         await navigator.share({ files: [file] });
         return;
