@@ -2024,17 +2024,66 @@ elements.showGridRuler.addEventListener("change", () => {
   if (latestQuantization) renderPatternImage(latestQuantization.indexes);
 });
 
-elements.saveImageButton.addEventListener("click", () => {
-  if (!latestQuantization) return;
+function createCurrentPatternExport() {
+  if (!latestQuantization) return null;
   const canvas = createCombinedExportCanvas(
     latestQuantization.indexes,
     elements.showGridRuler.checked,
     elements.includePalette.checked
   );
+  const filename = `fuse-bead-pattern-${elements.showGridRuler.checked ? "with-grid" : "clean"}${elements.includePalette.checked ? "-with-palette" : ""}.png`;
+  return { canvas, filename };
+}
+
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob(blob => {
+        if (blob) resolve(blob);
+        else reject(new Error("The browser could not create the PNG export."));
+      }, "image/png");
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function clickTemporaryDownloadLink(href, filename) {
   const link = document.createElement("a");
-  link.download = `fuse-bead-pattern-${elements.showGridRuler.checked ? "with-grid" : "clean"}${elements.includePalette.checked ? "-with-palette" : ""}.png`;
-  link.href = canvas.toDataURL("image/png");
+  link.href = href;
+  link.download = filename;
+  link.style.display = "none";
+  document.body.appendChild(link);
   link.click();
+  link.remove();
+}
+
+async function saveCurrentPatternImage() {
+  const exportResult = createCurrentPatternExport();
+  if (!exportResult) return;
+
+  const { canvas, filename } = exportResult;
+  try {
+    const blob = await canvasToPngBlob(canvas);
+    const objectUrl = URL.createObjectURL(blob);
+    clickTemporaryDownloadLink(objectUrl, filename);
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+  } catch (blobError) {
+    console.warn("Blob download unavailable; using PNG data URL fallback.", blobError);
+    clickTemporaryDownloadLink(canvas.toDataURL("image/png"), filename);
+  }
+}
+
+elements.saveImageButton.addEventListener("click", async () => {
+  if (!latestQuantization) return;
+  elements.saveImageButton.disabled = true;
+  try {
+    await saveCurrentPatternImage();
+  } catch (error) {
+    console.error("Image export failed", error);
+  } finally {
+    elements.saveImageButton.disabled = false;
+  }
 });
 
 function renderColorUsage(result) {
