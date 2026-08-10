@@ -18,6 +18,7 @@ const translations = {
     original24: "原始 24 × 24",
     beforePalette: "调色前预览",
     pattern24: "24 × 24 成品",
+    isolateTip: "小提示：点击色卡可以分离出当前选择颜色。",
     waiting: "等待导入图片",
     unsupported: "不支持的图片格式",
     readFailed: "无法读取此图片",
@@ -54,6 +55,7 @@ const translations = {
     original24: "Original 24 × 24",
     beforePalette: "Before palette conversion",
     pattern24: "24 × 24 Pattern",
+    isolateTip: "Tip: Click a palette color to isolate it in the pattern.",
     waiting: "Waiting for an image",
     unsupported: "Unsupported image type",
     readFailed: "Could not read this image",
@@ -2074,11 +2076,46 @@ async function saveCurrentPatternImage() {
   }
 }
 
+function isMobileShareEnvironment() {
+  return navigator.maxTouchPoints > 0 && window.matchMedia("(max-width: 1050px)").matches;
+}
+
+function createPngFileFromCanvas(canvas, filename) {
+  const dataUrl = canvas.toDataURL("image/png");
+  const encodedPng = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  const binaryPng = window.atob(encodedPng);
+  const bytes = new Uint8Array(binaryPng.length);
+  for (let index = 0; index < binaryPng.length; index += 1) bytes[index] = binaryPng.charCodeAt(index);
+  return new File([bytes], filename, { type: "image/png", lastModified: Date.now() });
+}
+
+async function shareCurrentPatternOnMobile() {
+  const exportResult = createCurrentPatternExport();
+  if (!exportResult) return;
+
+  const { canvas, filename } = exportResult;
+  if (typeof File === "function" && typeof navigator.share === "function" && typeof navigator.canShare === "function") {
+    const file = createPngFileFromCanvas(canvas, filename);
+    if (navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] });
+        return;
+      } catch (error) {
+        if (error?.name === "AbortError") return;
+        console.warn("Native image sharing unavailable; using file download fallback.", error);
+      }
+    }
+  }
+
+  await saveCurrentPatternImage();
+}
+
 elements.saveImageButton.addEventListener("click", async () => {
   if (!latestQuantization) return;
   elements.saveImageButton.disabled = true;
   try {
-    await saveCurrentPatternImage();
+    if (isMobileShareEnvironment()) await shareCurrentPatternOnMobile();
+    else await saveCurrentPatternImage();
   } catch (error) {
     console.error("Image export failed", error);
   } finally {

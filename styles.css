@@ -111,6 +111,8 @@ h2 { margin-bottom: 0; font-size: 1rem; }
 .preview-panel, .stage-one-panel { display: flex; flex-direction: column; }
 .result-panel { position: relative; display: flex; flex-direction: column; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+.pattern-heading-copy { display: flex; min-width: 0; align-items: baseline; flex-wrap: wrap; gap: 3px 10px; }
+.pattern-tip { color: #98948c; font-size: 0.7rem; font-weight: 400; line-height: 1.35; }
 .muted { margin: 0; color: var(--muted); font-size: 0.85rem; }
 .result-panel #patternStatus { position: absolute; top: 14px; right: 16px; }
 .language-switcher {
@@ -239,7 +241,18 @@ h2 { margin-bottom: 0; font-size: 1rem; }
   aspect-ratio: 1;
   place-items: center;
 }
-.pattern-image { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; image-rendering: pixelated; }
+.pattern-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  object-fit: contain;
+  image-rendering: pixelated;
+  pointer-events: auto;
+  user-select: auto;
+  -webkit-touch-callout: default;
+}
 .pattern-image[hidden] { display: none; }
 .palette-reference {
   display: grid;
