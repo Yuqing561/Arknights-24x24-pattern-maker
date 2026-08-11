@@ -19,6 +19,8 @@ const translations = {
     beforePalette: "调色前预览",
     pattern24: "24 × 24 成品",
     isolateTip: "小提示：点击色卡可以分离出当前选择颜色。",
+    modeNatural: "自然模式",
+    modeGraphic: "色块模式",
     waiting: "等待导入图片",
     unsupported: "不支持的图片格式",
     readFailed: "无法读取此图片",
@@ -56,6 +58,8 @@ const translations = {
     beforePalette: "Before palette conversion",
     pattern24: "24 × 24 Pattern",
     isolateTip: "Tip: Click a palette color to isolate it in the pattern.",
+    modeNatural: "Natural",
+    modeGraphic: "Graphic",
     waiting: "Waiting for an image",
     unsupported: "Unsupported image type",
     readFailed: "Could not read this image",
@@ -155,6 +159,7 @@ const elements = {
   includePalette: document.querySelector("#includePalette"),
   paletteReference: document.querySelector("#paletteReference"),
   status: document.querySelector("#patternStatus"),
+  modeOptions: [...document.querySelectorAll(".mode-option")],
   reconstructionError: document.querySelector("#reconstructionError"),
   redTraceReport: document.querySelector("#redTraceReport"),
   redTraceContent: document.querySelector("#redTraceContent"),
@@ -177,6 +182,7 @@ let importedImage = null;
 let currentObjectUrl = null;
 let latestQuantization = null;
 let isolatedPaletteIndex = null;
+let currentConversionMode = "natural";
 let cropSelection = { x: 0, y: 0, size: 1 };
 let containedImageBounds = { x: 0, y: 0, width: 1, height: 1 };
 let cropInteraction = null;
@@ -251,7 +257,7 @@ function clearColorIsolate({ render = true } = {}) {
 
 function setStatus(key, params = {}) {
   currentStatus = { key, params };
-  elements.status.textContent = translate(key, params);
+  if (elements.status) elements.status.textContent = translate(key, params);
 }
 
 function positionAnchoredUi() {
@@ -327,6 +333,20 @@ elements.importButton.addEventListener("click", () => elements.input.click());
 elements.languageOptions.forEach(button => {
   button.addEventListener("click", () => applyLanguage(button.dataset.language));
 });
+elements.modeOptions.forEach(button => {
+  button.addEventListener("click", () => {
+    const nextMode = button.dataset.mode === "graphic" ? "graphic" : "natural";
+    if (nextMode === currentConversionMode) return;
+    currentConversionMode = nextMode;
+    elements.modeOptions.forEach(option => {
+      const active = option.dataset.mode === currentConversionMode;
+      option.classList.toggle("is-active", active);
+      option.setAttribute("aria-pressed", String(active));
+    });
+    clearColorIsolate({ render: false });
+    if (latestQuantization && importedImage) generateCurrentPattern();
+  });
+});
 window.addEventListener("resize", positionAnchoredUi);
 window.addEventListener("load", positionAnchoredUi);
 elements.previewFrame.addEventListener("click", event => {
@@ -399,7 +419,9 @@ elements.previewFrame.addEventListener("drop", event => {
   if (file) loadImageFile(file);
 });
 
-elements.generateButton.addEventListener("click", () => {
+elements.generateButton.addEventListener("click", generateCurrentPattern);
+
+function generateCurrentPattern() {
   if (!importedImage) return;
   clearColorIsolate({ render: false });
   elements.generateButton.disabled = true;
@@ -410,7 +432,9 @@ elements.generateButton.addEventListener("click", () => {
     try {
       const stageOnePixels = downsampleSelectedCrop(GRID_SIZE);
       renderStageOne(stageOnePixels);
-      const result = quantizeToPalette(stageOnePixels, GRID_SIZE, palette);
+      const result = currentConversionMode === "graphic"
+        ? quantizeGraphicCropToPalette(GRID_SIZE, palette)
+        : quantizeToPalette(stageOnePixels, GRID_SIZE, palette);
       latestQuantization = result;
       renderPattern(result.indexes);
       renderPatternImage(result.indexes);
@@ -433,7 +457,7 @@ elements.generateButton.addEventListener("click", () => {
       elements.generateButton.disabled = false;
     }
   });
-});
+}
 
 function drawContainedPreview(image) {
   const canvas = elements.previewCanvas;
@@ -508,6 +532,216 @@ function downsampleSelectedCrop(targetSize) {
     context.drawImage(canvas, 0, 0, targetSize, targetSize);
   }
   return context.getImageData(0, 0, targetSize, targetSize).data;
+}
+
+// Graphic Mode is intentionally isolated from the frozen Natural Mode pipeline.
+// It samples the source distribution inside each output cell instead of averaging
+// that cell down to a single mixed pixel.
+function quantizeGraphicCropToPalette(size, availablePalette) {
+  const cells = sampleGraphicSourceCells(size, 10);
+  const sourceColors = cells.map(cell => cell.source);
+  const darkContexts = sourceColors.map((source, pixel) => analyzeDarkRegion(pixel, sourceColors, size));
+  const matches = cells.map((cell, pixel) => matchGraphicRepresentative(
+    cell.source,
+    cell.nearWhiteOccupancy,
+    availablePalette,
+    darkContexts[pixel]
+  ));
+  const initialIndexes = matches.map(match => match.index);
+  const confidences = cells.map((cell, pixel) => {
+    const regionConfidence = cell.lowVariance
+      ? 0.94
+      : Math.max(0, Math.min(1, (cell.dominantOccupancy - 0.34) / 0.5));
+    const paletteConfidence = 1 - Math.min(matches[pixel].perceptualError / 35, 1);
+    return 0.68 * regionConfidence + 0.32 * paletteConfidence;
+  });
+  const cleanup = cleanupGraphicIsolatedCells(
+    initialIndexes,
+    sourceColors,
+    confidences,
+    matches,
+    availablePalette,
+    size
+  );
+  const indexes = cleanup.indexes;
+  const tonalStats = analyzeTonalAssignments(indexes, sourceColors, availablePalette);
+  const averageDeltaE = indexes.reduce(
+    (sum, paletteIndex, pixel) => sum + deltaE2000(sourceColors[pixel].lab, availablePalette[paletteIndex].lab),
+    0
+  ) / indexes.length;
+  const diagnostics = cells.map((cell, pixel) => ({
+    mode: "graphic",
+    source: cell.source,
+    variance: cell.variance,
+    lowVariance: cell.lowVariance,
+    clusterCount: cell.clusterCount,
+    dominantOccupancy: cell.dominantOccupancy,
+    nearWhiteOccupancy: cell.nearWhiteOccupancy,
+    confidence: confidences[pixel],
+    selectedIndex: indexes[pixel],
+    initialIndex: initialIndexes[pixel],
+    cleaned: indexes[pixel] !== initialIndexes[pixel],
+    rankedCandidates: matches[pixel].rankedCandidates
+  }));
+
+  return {
+    mode: "graphic",
+    indexes,
+    averageDeltaE,
+    diagnostics,
+    tonalStats,
+    sourceColors,
+    assignmentLineage: [],
+    redTrace: { before: [], remaining: [], encountered: [], origins: {} },
+    speckleTrace: cleanup.changed,
+    detailRecoveryStats: null,
+    detailRecoveryChanges: []
+  };
+}
+
+function sampleGraphicSourceCells(size, samplesPerAxis) {
+  const sourceCanvas = elements.previewCanvas;
+  const context = sourceCanvas.getContext("2d", { willReadFrequently: true });
+  const imageData = context.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height).data;
+  const cropX = cropSelection.x * sourceCanvas.width;
+  const cropY = cropSelection.y * sourceCanvas.height;
+  const cropSize = cropSelection.size * sourceCanvas.width;
+  const cells = [];
+
+  for (let row = 0; row < size; row += 1) {
+    for (let column = 0; column < size; column += 1) {
+      const samples = [];
+      let nearWhiteCount = 0;
+      for (let sampleY = 0; sampleY < samplesPerAxis; sampleY += 1) {
+        for (let sampleX = 0; sampleX < samplesPerAxis; sampleX += 1) {
+          const sourceX = Math.max(0, Math.min(sourceCanvas.width - 1, Math.floor(
+            cropX + (column + (sampleX + 0.5) / samplesPerAxis) * cropSize / size
+          )));
+          const sourceY = Math.max(0, Math.min(sourceCanvas.height - 1, Math.floor(
+            cropY + (row + (sampleY + 0.5) / samplesPerAxis) * cropSize / size
+          )));
+          const offset = (sourceY * sourceCanvas.width + sourceX) * 4;
+          const rgb = [imageData[offset], imageData[offset + 1], imageData[offset + 2]];
+          const oklch = rgbToOklch(...rgb);
+          const oklab = [oklch.L, oklch.C * Math.cos(oklch.h), oklch.C * Math.sin(oklch.h)];
+          if (oklch.L >= 0.94 && oklch.C <= 0.035) nearWhiteCount += 1;
+          samples.push({ rgb, oklab });
+        }
+      }
+      cells.push(describeGraphicCell(samples, nearWhiteCount / samples.length));
+    }
+  }
+  return cells;
+}
+
+function describeGraphicCell(samples, nearWhiteOccupancy) {
+  const mean = [0, 1, 2].map(axis => samples.reduce((sum, sample) => sum + sample.oklab[axis], 0) / samples.length);
+  const variance = samples.reduce((sum, sample) => sum + graphicDistanceSquared(sample.oklab, mean), 0) / samples.length;
+  const lowVariance = variance < 0.0011;
+  const clusterCount = lowVariance ? 1 : variance < 0.004 ? 2 : 3;
+  const clusters = lowVariance ? [samples] : clusterGraphicSamples(samples, clusterCount);
+  const dominant = clusters.reduce((largest, cluster) => cluster.length > largest.length ? cluster : largest, clusters[0]);
+  const rgb = [0, 1, 2].map(channel => graphicMedian(dominant.map(sample => sample.rgb[channel])));
+  const oklch = rgbToOklch(...rgb);
+  const source = {
+    rgb,
+    hex: rgbToHex(...rgb),
+    ...describeLab(rgbToLab(...rgb)),
+    oklch
+  };
+  source.family = classifyHueFamily(oklch);
+  return {
+    source,
+    variance,
+    lowVariance,
+    clusterCount,
+    dominantOccupancy: dominant.length / samples.length,
+    nearWhiteOccupancy
+  };
+}
+
+function clusterGraphicSamples(samples, clusterCount) {
+  const mean = [0, 1, 2].map(axis => samples.reduce((sum, sample) => sum + sample.oklab[axis], 0) / samples.length);
+  const seeds = [samples.reduce((nearest, sample) =>
+    graphicDistanceSquared(sample.oklab, mean) < graphicDistanceSquared(nearest.oklab, mean) ? sample : nearest
+  )];
+  while (seeds.length < clusterCount) {
+    seeds.push(samples.reduce((farthest, sample) => {
+      const distance = Math.min(...seeds.map(seed => graphicDistanceSquared(sample.oklab, seed.oklab)));
+      const farthestDistance = Math.min(...seeds.map(seed => graphicDistanceSquared(farthest.oklab, seed.oklab)));
+      return distance > farthestDistance ? sample : farthest;
+    }));
+  }
+  let centroids = seeds.map(seed => [...seed.oklab]);
+  let clusters = [];
+  for (let iteration = 0; iteration < 6; iteration += 1) {
+    clusters = Array.from({ length: clusterCount }, () => []);
+    samples.forEach(sample => {
+      let best = 0;
+      for (let index = 1; index < centroids.length; index += 1) {
+        if (graphicDistanceSquared(sample.oklab, centroids[index]) < graphicDistanceSquared(sample.oklab, centroids[best])) best = index;
+      }
+      clusters[best].push(sample);
+    });
+    centroids = centroids.map((centroid, index) => clusters[index].length
+      ? [0, 1, 2].map(axis => clusters[index].reduce((sum, sample) => sum + sample.oklab[axis], 0) / clusters[index].length)
+      : centroid
+    );
+  }
+  return clusters.filter(cluster => cluster.length);
+}
+
+function matchGraphicRepresentative(source, nearWhiteOccupancy, availablePalette, darkContext) {
+  const white = availablePalette.find(candidate => candidate.hex === "#FFFFFF");
+  if (nearWhiteOccupancy >= 0.75 && white) {
+    return {
+      index: white.index,
+      perceptualError: deltaE2000(source.lab, white.lab),
+      rankedCandidates: [{ candidate: white, score: -1, perceptualError: deltaE2000(source.lab, white.lab) }]
+    };
+  }
+  const allowWhite = nearWhiteOccupancy >= 0.55 || sourceAllowsPureWhite(source);
+  const rankedCandidates = availablePalette
+    .filter(candidate => candidate.hex !== "#FFFFFF" || allowWhite)
+    .map(candidate => ({ candidate, ...hierarchicalColorIdentityScore(source, candidate, darkContext) }))
+    .sort((first, second) => first.score - second.score);
+  return {
+    index: rankedCandidates[0].candidate.index,
+    perceptualError: rankedCandidates[0].perceptualError,
+    rankedCandidates: rankedCandidates.slice(0, 5)
+  };
+}
+
+function cleanupGraphicIsolatedCells(indexes, sourceColors, confidences, matches, availablePalette, size) {
+  const cleaned = [...indexes];
+  const changed = [];
+  indexes.forEach((paletteIndex, position) => {
+    const neighbors = neighborPositions(position, size);
+    const counts = new Map();
+    neighbors.forEach(neighbor => counts.set(indexes[neighbor], (counts.get(indexes[neighbor]) || 0) + 1));
+    const sameCount = counts.get(paletteIndex) || 0;
+    const majority = [...counts.entries()].sort((first, second) => second[1] - first[1])[0];
+    if (!majority || sameCount > 1 || majority[1] < 5 || confidences[position] >= 0.55) return;
+    const source = sourceColors[position];
+    const currentError = matches[position].perceptualError;
+    if (source.oklch.C > 0.08 && currentError < 18) return;
+    const replacement = availablePalette[majority[0]];
+    const replacementError = deltaE2000(source.lab, replacement.lab);
+    if (Math.abs(source.oklch.L - replacement.oklch.L) > 0.15 || replacementError > currentError + 8) return;
+    cleaned[position] = replacement.index;
+    changed.push({ position, from: paletteIndex, to: replacement.index, confidence: confidences[position] });
+  });
+  return { indexes: cleaned, changed };
+}
+
+function graphicDistanceSquared(first, second) {
+  return (first[0] - second[0]) ** 2 + (first[1] - second[1]) ** 2 + (first[2] - second[2]) ** 2;
+}
+
+function graphicMedian(values) {
+  const sorted = [...values].sort((first, second) => first - second);
+  const middle = Math.floor(sorted.length / 2);
+  return Math.round(sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2);
 }
 
 function updateLiveStageOnePreview() {
@@ -2221,6 +2455,41 @@ function formatHue(oklch) {
 function showCellDebug(position) {
   if (!DEBUG_MODE || !latestQuantization) return;
   const diagnostic = latestQuantization.diagnostics[position];
+  if (diagnostic.mode === "graphic") {
+    const row = Math.floor(position / GRID_SIZE) + 1;
+    const column = position % GRID_SIZE + 1;
+    const selected = palette[diagnostic.selectedIndex];
+    elements.cellDebugPosition.textContent = `Row ${row}, column ${column} · Graphic Mode`;
+    elements.cellDebugSummary.innerHTML = `
+      <section class="debug-card">
+        <h3>Graphic source-cell analysis</h3>
+        <dl>
+          <dt>Representative RGB / HEX</dt><dd>${diagnostic.source.rgb.join(", ")} / ${diagnostic.source.hex}</dd>
+          <dt>Perceptual variance</dt><dd>${diagnostic.variance.toFixed(6)}</dd>
+          <dt>Low variance</dt><dd>${diagnostic.lowVariance ? "Yes" : "No"}</dd>
+          <dt>Clusters</dt><dd>${diagnostic.clusterCount}</dd>
+          <dt>Dominant occupancy</dt><dd>${(diagnostic.dominantOccupancy * 100).toFixed(1)}%</dd>
+          <dt>Near-white occupancy</dt><dd>${(diagnostic.nearWhiteOccupancy * 100).toFixed(1)}%</dd>
+          <dt>Confidence</dt><dd>${diagnostic.confidence.toFixed(3)}</dd>
+          <dt>Selected bead</dt><dd>Color ${selected.id} · ${selected.hex}</dd>
+          <dt>Cleanup changed cell</dt><dd>${diagnostic.cleaned ? "Yes" : "No"}</dd>
+        </dl>
+      </section>`;
+    elements.candidateTableBody.innerHTML = diagnostic.rankedCandidates.map((entry, rank) => `
+      <tr>
+        <td>${rank + 1}</td>
+        <td>Color ${entry.candidate.id}</td>
+        <td>${entry.candidate.hex}</td>
+        <td>${entry.candidate.oklch.L.toFixed(5)}</td>
+        <td>${entry.candidate.oklch.C.toFixed(5)}</td>
+        <td>${formatHue(entry.candidate.oklch)}</td>
+        <td colspan="5">Graphic representative match</td>
+        <td>${entry.score.toFixed(3)}</td>
+      </tr>`).join("");
+    elements.cellDebugPanel.hidden = false;
+    elements.cellDebugPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    return;
+  }
   const selected = diagnostic.selected;
   const row = Math.floor(position / GRID_SIZE) + 1;
   const column = position % GRID_SIZE + 1;
