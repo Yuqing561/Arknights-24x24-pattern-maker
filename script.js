@@ -2142,10 +2142,11 @@ function renderPattern(indexes) {
 function createPatternExportCanvas(indexes, includeGridAndRuler, previewIsolateIndex = null) {
   const cellSize = 32;
   const rulerSize = includeGridAndRuler ? 32 : 0;
+  const outerBorderSize = includeGridAndRuler ? 7 : 0;
   const artworkSize = GRID_SIZE * cellSize;
   const canvas = document.createElement("canvas");
-  canvas.width = artworkSize + rulerSize;
-  canvas.height = artworkSize + rulerSize;
+  canvas.width = artworkSize + rulerSize + outerBorderSize;
+  canvas.height = artworkSize + rulerSize + outerBorderSize;
   const context = canvas.getContext("2d");
   context.imageSmoothingEnabled = false;
   context.fillStyle = "#FFFFFF";
@@ -2168,17 +2169,7 @@ function createPatternExportCanvas(indexes, includeGridAndRuler, previewIsolateI
   });
 
   if (includeGridAndRuler) {
-    context.strokeStyle = "rgba(24, 24, 24, 0.45)";
-    context.lineWidth = 1;
-    context.beginPath();
-    for (let coordinate = 0; coordinate <= GRID_SIZE; coordinate += 1) {
-      const offset = rulerSize + coordinate * cellSize + 0.5;
-      context.moveTo(offset, rulerSize);
-      context.lineTo(offset, rulerSize + artworkSize);
-      context.moveTo(rulerSize, offset);
-      context.lineTo(rulerSize + artworkSize, offset);
-    }
-    context.stroke();
+    drawPatternGrid(context, rulerSize, cellSize, artworkSize);
 
     context.fillStyle = "#242321";
     context.font = "12px Arial, sans-serif";
@@ -2204,6 +2195,74 @@ function createPatternExportCanvas(indexes, includeGridAndRuler, previewIsolateI
     });
   }
   return canvas;
+}
+
+function drawPatternGrid(context, rulerSize, cellSize, artworkSize) {
+  const gridColor = "#121212";
+  const guideColor = "#0D0D0D";
+  const outerBorderWidth = 7;
+  context.save();
+  context.lineCap = "butt";
+  context.lineJoin = "miter";
+  context.strokeStyle = gridColor;
+
+  // Pass 1: all 23 internal vertical and horizontal boundaries are complete,
+  // unconditional lines. The four outer boundaries are intentionally excluded
+  // here so they are drawn exactly once by the final boundary pass.
+  context.lineWidth = 2;
+  context.beginPath();
+  for (let coordinate = 1; coordinate < GRID_SIZE; coordinate += 1) {
+    const offset = rulerSize + coordinate * cellSize;
+    context.moveTo(offset, rulerSize);
+    context.lineTo(offset, rulerSize + artworkSize);
+    context.moveTo(rulerSize, offset);
+    context.lineTo(rulerSize + artworkSize, offset);
+  }
+  context.stroke();
+
+  // Pass 2: continuous 6-unit overlays at 8 and 16 make the nine 8×8 regions
+  // unmistakable while preserving the underlying equal cell geometry.
+  context.strokeStyle = guideColor;
+  context.lineWidth = 6;
+  context.beginPath();
+  [8, 16].forEach(coordinate => {
+    const offset = rulerSize + coordinate * cellSize;
+    context.moveTo(offset, rulerSize);
+    context.lineTo(offset, rulerSize + artworkSize);
+    context.moveTo(rulerSize, offset);
+    context.lineTo(rulerSize + artworkSize, offset);
+  });
+  context.stroke();
+
+  // A one-unit opaque gray accent runs through the exact center of each thick
+  // guide without changing its total width or position.
+  context.strokeStyle = "#595959";
+  context.lineWidth = 1;
+  context.beginPath();
+  [8, 16].forEach(coordinate => {
+    const offset = rulerSize + coordinate * cellSize + 0.5;
+    context.moveTo(offset, rulerSize);
+    context.lineTo(offset, rulerSize + artworkSize);
+    context.moveTo(rulerSize, offset);
+    context.lineTo(rulerSize + artworkSize, offset);
+  });
+  context.stroke();
+
+  // Pass 3: the four outermost grid boundaries are the single outer border.
+  // Their strokes sit wholly outside the artwork, preserving every outer cell.
+  context.strokeStyle = gridColor;
+  context.lineWidth = outerBorderWidth;
+  context.beginPath();
+  context.moveTo(rulerSize - outerBorderWidth, rulerSize - outerBorderWidth / 2);
+  context.lineTo(rulerSize + artworkSize + outerBorderWidth, rulerSize - outerBorderWidth / 2);
+  context.moveTo(rulerSize - outerBorderWidth, rulerSize + artworkSize + outerBorderWidth / 2);
+  context.lineTo(rulerSize + artworkSize + outerBorderWidth, rulerSize + artworkSize + outerBorderWidth / 2);
+  context.moveTo(rulerSize - outerBorderWidth / 2, rulerSize - outerBorderWidth);
+  context.lineTo(rulerSize - outerBorderWidth / 2, rulerSize + artworkSize + outerBorderWidth);
+  context.moveTo(rulerSize + artworkSize + outerBorderWidth / 2, rulerSize - outerBorderWidth);
+  context.lineTo(rulerSize + artworkSize + outerBorderWidth / 2, rulerSize + artworkSize + outerBorderWidth);
+  context.stroke();
+  context.restore();
 }
 
 function createCombinedExportCanvas(indexes, includeGridAndRuler, includeColorPalette) {
