@@ -21,6 +21,8 @@ const translations = {
     isolateTip: "小提示：点击色卡可以分离出当前选择颜色。",
     modeNatural: "自然模式",
     modeGraphic: "色块模式",
+    guideNineGrid: "九宫格",
+    guideCrosshair: "十字线",
     waiting: "等待导入图片",
     unsupported: "不支持的图片格式",
     readFailed: "无法读取此图片",
@@ -60,6 +62,8 @@ const translations = {
     isolateTip: "Tip: Click a palette color to isolate it in the pattern.",
     modeNatural: "Natural",
     modeGraphic: "Graphic",
+    guideNineGrid: "9-Grid",
+    guideCrosshair: "Crosshair",
     waiting: "Waiting for an image",
     unsupported: "Unsupported image type",
     readFailed: "Could not read this image",
@@ -160,6 +164,8 @@ const elements = {
   paletteReference: document.querySelector("#paletteReference"),
   status: document.querySelector("#patternStatus"),
   modeOptions: [...document.querySelectorAll(".mode-option")],
+  guideSelector: document.querySelector("#guideSelector"),
+  guideOptions: [...document.querySelectorAll(".guide-option")],
   reconstructionError: document.querySelector("#reconstructionError"),
   redTraceReport: document.querySelector("#redTraceReport"),
   redTraceContent: document.querySelector("#redTraceContent"),
@@ -183,6 +189,8 @@ let currentObjectUrl = null;
 let latestQuantization = null;
 let isolatedPaletteIndex = null;
 let currentConversionMode = "natural";
+let nineGridGuideEnabled = true;
+let crosshairGuideEnabled = false;
 let cropSelection = { x: 0, y: 0, size: 1 };
 let containedImageBounds = { x: 0, y: 0, width: 1, height: 1 };
 let cropInteraction = null;
@@ -347,6 +355,22 @@ elements.modeOptions.forEach(button => {
     if (latestQuantization && importedImage) generateCurrentPattern();
   });
 });
+elements.guideOptions.forEach(button => {
+  button.addEventListener("change", () => {
+    if (button.dataset.guide === "nine-grid") nineGridGuideEnabled = button.checked;
+    else crosshairGuideEnabled = button.checked;
+    updateGuideControls();
+    if (latestQuantization) renderPatternImage(latestQuantization.indexes);
+  });
+});
+
+function updateGuideControls() {
+  elements.guideSelector.hidden = !elements.showGridRuler.checked;
+  elements.guideOptions.forEach(button => {
+    const active = button.dataset.guide === "nine-grid" ? nineGridGuideEnabled : crosshairGuideEnabled;
+    button.checked = active;
+  });
+}
 window.addEventListener("resize", positionAnchoredUi);
 window.addEventListener("load", positionAnchoredUi);
 elements.previewFrame.addEventListener("click", event => {
@@ -2206,47 +2230,37 @@ function drawPatternGrid(context, rulerSize, cellSize, artworkSize) {
   context.lineJoin = "miter";
   context.strokeStyle = gridColor;
 
-  // Pass 1: all 23 internal vertical and horizontal boundaries are complete,
-  // unconditional lines. The four outer boundaries are intentionally excluded
-  // here so they are drawn exactly once by the final boundary pass.
-  context.lineWidth = 2;
-  context.beginPath();
-  for (let coordinate = 1; coordinate < GRID_SIZE; coordinate += 1) {
-    const offset = rulerSize + coordinate * cellSize;
-    context.moveTo(offset, rulerSize);
-    context.lineTo(offset, rulerSize + artworkSize);
-    context.moveTo(rulerSize, offset);
-    context.lineTo(rulerSize + artworkSize, offset);
-  }
-  context.stroke();
+  const majorGuideCoordinates = [];
+  if (nineGridGuideEnabled) majorGuideCoordinates.push(8, 16);
+  if (crosshairGuideEnabled) majorGuideCoordinates.push(12);
 
-  // Pass 2: continuous 6-unit overlays at 8 and 16 make the nine 8×8 regions
-  // unmistakable while preserving the underlying equal cell geometry.
-  context.strokeStyle = guideColor;
-  context.lineWidth = 6;
-  context.beginPath();
-  [8, 16].forEach(coordinate => {
+  // Pass 1: every ordinary boundary is an exact 2×artworkSize integer-aligned
+  // rectangle. This avoids stroke antialiasing and guarantees one identical
+  // source width for every non-guide row and column.
+  context.fillStyle = gridColor;
+  for (let coordinate = 1; coordinate < GRID_SIZE; coordinate += 1) {
+    if (majorGuideCoordinates.includes(coordinate)) continue;
     const offset = rulerSize + coordinate * cellSize;
-    context.moveTo(offset, rulerSize);
-    context.lineTo(offset, rulerSize + artworkSize);
-    context.moveTo(rulerSize, offset);
-    context.lineTo(rulerSize + artworkSize, offset);
+    context.fillRect(offset - 1, rulerSize, 2, artworkSize);
+    context.fillRect(rulerSize, offset - 1, artworkSize, 2);
+  }
+
+  // Pass 2: enabled guide overlays share one established visual treatment.
+  context.fillStyle = guideColor;
+  majorGuideCoordinates.forEach(coordinate => {
+    const offset = rulerSize + coordinate * cellSize;
+    context.fillRect(offset - 3, rulerSize, 6, artworkSize);
+    context.fillRect(rulerSize, offset - 3, artworkSize, 6);
   });
-  context.stroke();
 
   // A one-unit opaque gray accent runs through the exact center of each thick
   // guide without changing its total width or position.
-  context.strokeStyle = "#595959";
-  context.lineWidth = 1;
-  context.beginPath();
-  [8, 16].forEach(coordinate => {
-    const offset = rulerSize + coordinate * cellSize + 0.5;
-    context.moveTo(offset, rulerSize);
-    context.lineTo(offset, rulerSize + artworkSize);
-    context.moveTo(rulerSize, offset);
-    context.lineTo(rulerSize + artworkSize, offset);
+  context.fillStyle = "#595959";
+  majorGuideCoordinates.forEach(coordinate => {
+    const offset = rulerSize + coordinate * cellSize;
+    context.fillRect(offset, rulerSize, 1, artworkSize);
+    context.fillRect(rulerSize, offset, artworkSize, 1);
   });
-  context.stroke();
 
   // Pass 3: the four outermost grid boundaries are the single outer border.
   // Their strokes sit wholly outside the artwork, preserving every outer cell.
@@ -2311,11 +2325,13 @@ function createCombinedExportCanvas(indexes, includeGridAndRuler, includeColorPa
 function renderPatternImage(indexes) {
   const canvas = createPatternExportCanvas(indexes, elements.showGridRuler.checked, isolatedPaletteIndex);
   elements.patternImage.src = canvas.toDataURL("image/png");
+  elements.patternImage.classList.toggle("has-grid-ruler", elements.showGridRuler.checked);
   elements.patternImage.hidden = DEBUG_MODE;
   elements.grid.style.display = DEBUG_MODE ? "grid" : "none";
 }
 
 elements.showGridRuler.addEventListener("change", () => {
+  updateGuideControls();
   if (latestQuantization) renderPatternImage(latestQuantization.indexes);
 });
 
@@ -2799,4 +2815,5 @@ function initializeDisplayMode() {
 initializeGrid();
 initializePaletteReference();
 initializeDisplayMode();
+updateGuideControls();
 applyLanguage("zh");

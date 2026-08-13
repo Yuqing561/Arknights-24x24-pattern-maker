@@ -136,6 +136,14 @@ h2 { margin-bottom: 0; font-size: 1rem; }
 .mode-option.is-active { background: var(--panel); color: var(--accent); font-weight: 750; }
 .mode-option:active { transform: scale(0.98); transition-duration: 60ms; }
 .mode-option:focus-visible { outline: 2px solid rgba(49, 92, 76, 0.35); outline-offset: 1px; }
+.pattern-heading-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; }
+.guide-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.guide-selector[hidden] { display: none; }
+.guide-toggle { min-height: 27px; font-size: 0.72rem; white-space: nowrap; }
 .language-switcher {
   position: absolute;
   z-index: 2;
@@ -275,6 +283,7 @@ h2 { margin-bottom: 0; font-size: 1rem; }
   -webkit-touch-callout: default;
 }
 .pattern-image[hidden] { display: none; }
+.pattern-image.has-grid-ruler { image-rendering: auto; }
 .palette-reference {
   display: grid;
   width: 100%;
@@ -443,6 +452,8 @@ h2 { margin-bottom: 0; font-size: 1rem; }
   .intro { font-size: 0.86rem; white-space: normal; }
   .result-panel > .panel-heading { align-items: flex-start; }
   .mode-selector { margin-left: auto; }
+  .pattern-heading-controls { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+  .mode-selector { margin-left: 0; }
   .mode-option { padding-inline: 7px; }
   .language-option { padding-inline: 6px; }
   .workspace { gap: 12px; }
